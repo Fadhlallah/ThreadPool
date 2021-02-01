@@ -4,6 +4,10 @@ set(libname "libthreadpool")
 
 project("${libname}")
 
+if(WIN32)
+	ADD_DEFINITIONS(-DTHREAD_POOL_EXPORTS -D__WIN__)
+endif()
+
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")
 
 file(GLOB SRCS "${CMAKE_CURRENT_SOURCE_DIR}/src/*")

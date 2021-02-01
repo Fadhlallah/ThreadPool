@@ -7,13 +7,20 @@
 #include<future>
 #include<iostream>
 
+#ifdef __WIN__
+	#ifdef THREAD_POOL_EXPORTS
+		#define THREAD_POOL __declspec(dllexport)
+	#else
+		#define THREAD_POOL __declspec(dllimport)
+	#endif
+#endif
 
 
 
 namespace threadpool
 {
 	
-	class ThreadPool
+	class THREAD_POOL ThreadPool
 	{
 
 	private:
@@ -38,7 +45,7 @@ namespace threadpool
 		ThreadPool(uint32_t i_jobsnbr = 5, bool i_start = false);
 		~ThreadPool();
 		void start();
-		void stop();
+		void stop(bool i_finish_job = true);
 		void pause();
 		uint32_t  getJobnbr() const { return _jobnbr;  }
 		status getStatus() const { return  _thread_pool_status; }
@@ -51,6 +58,7 @@ namespace threadpool
 		std::vector<std::thread> _workers;
 		std::mutex _workers_mutex;
 		std::condition_variable _workers_cond_variable ;
+		std::condition_variable _finish_job_variable ;
 		std::queue<std::function<void()>> _jobs;
 
 		
@@ -79,10 +87,12 @@ namespace threadpool
 		for (;;)
 		{
 			std::unique_lock<std::mutex> a_lock(_workers_mutex);
-			if (_thread_pool_status == status::stopped || _thread_pool_status == status::paused)
+			
+			if (_thread_pool_status != status::started)
 			{
+				std::cout << "thread id(" << std::this_thread::get_id() << ") quitting, byeeeeeeeeee\n";
 				a_lock.unlock();
-				return;
+				break;;
 			}
 			auto a_condition = [this]() {return (!_jobs.empty()
 				&& (_thread_pool_status == status::started)); };
@@ -91,7 +101,7 @@ namespace threadpool
 			_jobs.pop();
 			a_lock.unlock();
 			a_job();
-			
+			_finish_job_variable.notify_one();			
 		}
 	}
 	
@@ -145,19 +155,26 @@ namespace threadpool
 			_thread_pool_status = status::paused;
 	}
 
-	void ThreadPool::stop()
+	void ThreadPool::stop(bool i_finish_job)
 	{
-		std::lock_guard<std::mutex> a_guard(_workers_mutex);
-		if (_thread_pool_status == status::stopped)
-			return;
-		for (std::thread& worker : _workers)
-		{
-			worker.join();
-		}
-
-		while (!_jobs.empty()) _jobs.pop();
+		std::unique_lock<std::mutex> a_lock(_workers_mutex);
+		std::cout<<"thread stopping 1\n";
+		if(i_finish_job)
+			_finish_job_variable.wait(a_lock, [this](){ return this->_jobs.empty();});
 
 		_thread_pool_status = status::stopped;
+		a_lock.unlock();
+		
+		for (std::thread& worker : _workers)
+		{
+			std::cout<<"thread "<< worker.get_id() << " stopping\n";
+			worker.join();
+			std::cout<<"thread "<< worker.get_id() << " stopped \n";
+		}
+		
+		while (!_jobs.empty()) _jobs.pop();
+
+		std::cout<<"Threadpool stopped\n";
 	}
 
 	void ThreadPool::changePoolSize(uint32_t i_jobsnbr)
